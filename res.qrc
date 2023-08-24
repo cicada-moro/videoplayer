@@ -1,0 +1,16 @@
+<RCC>
+    <qresource prefix="/image">
+        <file>image/before.png</file>
+        <file>image/close.png</file>
+        <file>image/flush.png</file>
+        <file>image/next.png</file>
+        <file>image/Open.png</file>
+        <file>image/setting.png</file>
+        <file>image/start.png</file>
+        <file>image/stop.png</file>
+        <file>image/volume.png</file>
+        <file>image/window_enlarged.png</file>
+        <file>image/window_smalled.png</file>
+        <file>image/small_size.png</file>
+    </qresource>
+</RCC>
