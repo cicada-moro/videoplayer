@@ -28,18 +28,23 @@ public:
     void init();
     double openFileCtx(QString str);
     void closeAndFree();
-    AVPacket readAVPacket();
+    AVPacket *readAVPacket();
     int decodeAVPacket(const AVPacket *pkt);
     bool ToRGB(char *out, int outwidth, int outheight);
     int ToPCM(char *out);
+
+    int videoStream() const;
+    int audioStream() const;
 
 private:
          //ffmpeg相关变量预先定义与分配
     AVFormatContext *m_pAVFormatCtx;    //解封装上下文
     SwsContext  *m_pSwsCtx;             //视频转码上下文
-    SwrContext  *m_pSwrCtx;
+    SwrContext  *m_pSwrCtx=NULL;
 
     AVCodecContext *avCodecCtx;         //解码上下文
+    AVCodecContext *v_CodecCtx;
+    AVCodecContext *a_CodecCtx;
     AVFrame *m_pAVFrame = 0;            // ffmpeg单帧缓存
     AVFrame *m_pYuvFrame;
     AVFrame *m_pPcmFrame;

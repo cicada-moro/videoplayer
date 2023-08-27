@@ -6,6 +6,11 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <ffmpeg.h>
+#include <QAudioSink>
+#include <QMediaDevices>
+#include <QAudioDevice>
+#include <QAudioFormat>
+#include <QMediaPlayer>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -133,20 +138,53 @@ void MainWindow::on_open_triggered()
 
     int outwidth=ui->video->width();
     int outheight=ui->video->height();
+    //初始化音频输出设备
+    QMediaDevices *m_devices=new QMediaDevices(this);
+    QAudioDevice m_device=m_devices->defaultAudioOutput();
+    QAudioFormat fmt=m_device.preferredFormat();
+    QAudioSink *m_sink=new QAudioSink(m_device,fmt);
+    QIODevice *io;
+    //IODevice获取本机扬声器
+    io=m_sink->start();
+    //        qDebug()<<m_sink->state()<<m_sink->error();
+    io->open(QIODevice::ReadWrite);
+
     while( true){
-        AVPacket pkt=video->readAVPacket();
-        if(pkt.data==0){
+        AVPacket *pkt=video->readAVPacket();
+        if(pkt->data==0){
             break;
         }
 
-        int num=video->decodeAVPacket(&pkt);
-        char *out=new char[outwidth*outheight*4];//解码后的RGB视频数据
-        video->ToRGB(out,outwidth,outheight);
+        int num=video->decodeAVPacket(pkt);
+        char *out_video=new char[outwidth*outheight*4];//解码后的RGB视频数据
 
-        QImage image((uchar *)out,outwidth,outheight,QImage::Format_RGB32);
-        ui->video->setPixmap(QPixmap::fromImage(image));
-        ui->video_slider->setValue(num);
-        delay(400);
+        char *out_audio=new char[1024*1024];
+//        qDebug()<<pkt->stream_index<<video->videoStream();
+        if(pkt->stream_index==video->videoStream()){
+            video->ToRGB(out_video,outwidth,outheight);
+
+            QImage image((uchar *)out_video,outwidth,outheight,QImage::Format_RGB32);
+            ui->video->setPixmap(QPixmap::fromImage(image));
+            ui->video_slider->setValue(num);
+        }
+        else if(pkt->stream_index==video->audioStream()){
+            int outsize=video->ToPCM(out_audio);
+            //废物字节流写错数据（生气）
+//            QByteArray audio_data=QByteArray(out_audio,outsize);
+
+//        qDebug()<<audio_data;
+
+//        旧版本的QAudioFormat
+//        qDebug()<<outsize<<audio_data;
+//        QAudioFormat fmt;
+//        fmt.setSampleRate(44100);//设置采样率
+//        fmt.setChannelCount(2);//设置通道数
+//        fmt.setSampleFormat(QAudioFormat::Int16);
+
+
+            io->write(out_audio,outsize);
+        }
+        delay(25);
 //        image.save(QString("%1.png").arg(outwidth));
     }
 

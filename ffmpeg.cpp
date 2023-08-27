@@ -18,8 +18,8 @@ void FFmpeg::init()
     m_pSwrCtx = NULL;//音频重采样上下文
 
     m_totalMs = 0;//总时长
-    m_videoStream = 0;//视频流
-    m_audioStream = 1;//音频流
+    m_videoStream = 999;//视频流
+    m_audioStream = 999;//音频流
     m_fps = 0;//每秒的视频帧数
 
     m_pts = 0;//获得当前解码帧的时间
@@ -77,9 +77,9 @@ double FFmpeg::openFileCtx(QString str)
                 qDebug()<<"video code not find\n";
                 return 0;
             }
-            avCodecCtx=avcodec_alloc_context3(avCodec);//初始化
-            avcodec_parameters_to_context(avCodecCtx,avcdecpar);
-            int err = avcodec_open2(avCodecCtx, avCodec, NULL);//打开解码器
+            v_CodecCtx=avcodec_alloc_context3(avCodec);//初始化
+            avcodec_parameters_to_context(v_CodecCtx,avcdecpar);
+            int err = avcodec_open2(v_CodecCtx, avCodec, NULL);//打开解码器
             if (err != 0)//未打开解码器
             {
 //                m_mutex.unlock();
@@ -95,16 +95,16 @@ double FFmpeg::openFileCtx(QString str)
         {
             m_audioStream = i;//音频流
             const AVCodec *avCodec = avcodec_find_decoder(avcdecpar->codec_id);//查找解码器
-            avCodecCtx=avcodec_alloc_context3(avCodec);//初始化
-            avcodec_parameters_to_context(avCodecCtx,avcdecpar);
-            if (avcodec_open2(avCodecCtx, avCodec, NULL) < 0)
+            a_CodecCtx=avcodec_alloc_context3(avCodec);//初始化
+            avcodec_parameters_to_context(a_CodecCtx,avcdecpar);
+            if (avcodec_open2(a_CodecCtx, avCodec, NULL) < 0)
             {
 //                m_mutex.unlock();
                 return 0;
             }
-            m_sampleRate = avCodecCtx->sample_rate;//样本率
-            m_channel = avCodecCtx->channels;//通道数
-            switch (avCodecCtx->sample_fmt)//样本大小
+            m_sampleRate = a_CodecCtx->sample_rate;//样本率
+            m_channel = a_CodecCtx->channels;//通道数
+            switch (a_CodecCtx->sample_fmt)//样本大小
             {
             case AV_SAMPLE_FMT_S16://signed 16 bits
                 m_sampleSize = 16;
@@ -147,17 +147,17 @@ void FFmpeg::closeAndFree()
 }
 
 //读取视频的每一帧
-AVPacket FFmpeg::readAVPacket()
+AVPacket *FFmpeg::readAVPacket()
 {
-    AVPacket pkt;
-    memset(&pkt, 0, sizeof(AVPacket));
-//    m_mutex.lock();
+    AVPacket *pkt=av_packet_alloc();
+//    memset(&pkt, 0, sizeof(AVPacket));
+    //    m_mutex.lock();
     if (!m_pAVFormatCtx)
     {
 //        m_mutex.unlock();
         return pkt;
     }
-    int err = av_read_frame(m_pAVFormatCtx, &pkt);//读取视频帧
+    int err = av_read_frame(m_pAVFormatCtx, pkt);//读取视频帧
     if (err != 0)//读取失败
     {
         av_strerror(err, m_errorBuff, sizeof(m_errorBuff));
@@ -176,22 +176,29 @@ int FFmpeg::decodeAVPacket(const AVPacket *pkt)
         return -1;
 
     }
-    if (m_pYuvFrame == NULL)//申请解码的对象空间
+    if (m_pYuvFrame == NULL&&pkt->stream_index == m_videoStream)//申请解码的对象空间
     {
         m_pYuvFrame = av_frame_alloc();
     }
-    if (m_pPcmFrame == NULL)
+    if (m_pPcmFrame == NULL&&pkt->stream_index == m_audioStream)
     {
         m_pPcmFrame = av_frame_alloc();
     }
 //    AVFrame *frame=av_frame_alloc();
     AVFrame *frame = m_pYuvFrame;//此时的frame是解码后的视频流
+    avCodecCtx=v_CodecCtx;
     if (pkt->stream_index == m_audioStream)//若为音频
     {
+        qDebug()<<"is audio";
         frame = m_pPcmFrame;//此时frame是解码后的音频流
+        avCodecCtx=a_CodecCtx;
     }
     avcodec_parameters_to_context(avCodecCtx,m_pAVFormatCtx->streams[pkt->stream_index]->codecpar);
+    //解决音频解码时出现：Could not update timestamps for skipped samples
+    avCodecCtx->pkt_timebase=m_pAVFormatCtx->streams[pkt->stream_index]->time_base;
+
     int ret = avcodec_send_packet(avCodecCtx, pkt);//发送之前读取的pkt
+
     if (ret != 0)
     {
 //        m_mutex.unlock();
@@ -216,7 +223,6 @@ int FFmpeg::decodeAVPacket(const AVPacket *pkt)
     int p = frame->pts*av_q2d(m_pAVFormatCtx->streams[pkt->stream_index]->time_base);//当前解码的显示时间
     if (pkt->stream_index == m_audioStream)//为音频流时设置pts
         m_pts = p;
-//    qDebug()<<m_pts;
     return p;
 }
 
@@ -227,6 +233,7 @@ bool FFmpeg::ToRGB(char *out, int outwidth, int outheight)
     if (!m_pAVFormatCtx || !m_pYuvFrame)//未打开视频文件或者未解码
     {
 //        m_mutex.unlock();
+
         return false;
     }
     AVCodecContext *videoCtx=nullptr;
@@ -276,6 +283,8 @@ bool FFmpeg::ToRGB(char *out, int outwidth, int outheight)
 
 //    out=(char *)m_pAVFrameRGB32->data[0];
 //    av_frame_free(&m_pAVFrameRGB32);
+    sws_freeContext(m_pSwsCtx);
+    av_frame_free(&m_pYuvFrame);
 
     if (h > 0)
     {
@@ -287,39 +296,59 @@ bool FFmpeg::ToRGB(char *out, int outwidth, int outheight)
 
 int FFmpeg::ToPCM(char *out)
 {
-    m_mutex.lock();
-    if (!m_pAVFormatCtx || !m_pPcmFrame || !out)//文件未打开，解码器未打开，无数据
+//    m_mutex.lock();
+    if (!m_pAVFormatCtx || !m_pPcmFrame )//文件未打开，解码器未打开，无数据
     {
-        m_mutex.unlock();
+//        m_mutex.unlock();
         return 0;
     }
 
     AVCodecContext *avCodecCtx_Audio =nullptr;
-    avcodec_parameters_to_context(avCodecCtx_Audio,m_pAVFormatCtx->streams[m_audioStream]->codecpar);//音频解码器上下文
+    AVCodecParameters *avcodpar=m_pAVFormatCtx->streams[m_audioStream]->codecpar;
+    const AVCodec *avcodec=avcodec_find_decoder(avcodpar->codec_id);
+    avCodecCtx_Audio=avcodec_alloc_context3(avcodec);
+    avcodec_parameters_to_context(avCodecCtx_Audio,avcodpar);//音频解码器上下文
+
+    qDebug()<<avCodecCtx_Audio->channel_layout
+             <<avCodecCtx_Audio->sample_rate<<avCodecCtx_Audio->sample_fmt<<m_pts;
     if(m_pSwrCtx == NULL)
     {
         m_pSwrCtx = swr_alloc();//初始化
         swr_alloc_set_opts(m_pSwrCtx,avCodecCtx_Audio->channel_layout,AV_SAMPLE_FMT_S16,
                            avCodecCtx_Audio->sample_rate,
-                           avCodecCtx_Audio->channels,
+                           avCodecCtx_Audio->channel_layout,
                            avCodecCtx_Audio->sample_fmt,
                            avCodecCtx_Audio->sample_rate, 0,0);
 
         swr_init(m_pSwrCtx);
     }
-    uint8_t  *data[1];
+    uint8_t  *data[AV_NUM_DATA_POINTERS] = { 0 };
     data[0] = (uint8_t *)out;
-    int len = swr_convert(m_pSwrCtx, data, 10000, (const uint8_t **)m_pPcmFrame->data, m_pPcmFrame->nb_samples);
+    int len = swr_convert(m_pSwrCtx, data, m_pPcmFrame->nb_samples, (const uint8_t **)m_pPcmFrame->data, m_pPcmFrame->nb_samples);
     if(len <= 0)
     {
-        m_mutex.unlock();
+//        m_mutex.unlock();
+        qDebug()<<len;
         return 0;
     }
 
     int outsize = av_samples_get_buffer_size(NULL, avCodecCtx_Audio->channels,
                                              m_pPcmFrame->nb_samples,AV_SAMPLE_FMT_S16,0);
+//    outsize=len*avCodecCtx_Audio->channels*av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
 
-    m_mutex.unlock();
+//    swr_free(&m_pSwrCtx);
+    av_frame_free(&m_pPcmFrame);
+//    m_mutex.unlock();
 
     return outsize;
+}
+
+int FFmpeg::videoStream() const
+{
+    return m_videoStream;
+}
+
+int FFmpeg::audioStream() const
+{
+    return m_audioStream;
 }

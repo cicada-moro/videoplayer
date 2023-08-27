@@ -1,4 +1,5 @@
 QT       += core gui
+QT       += multimedia
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -13,13 +14,15 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     slider.cpp \
-    title.cpp
+    title.cpp \
+    videodata.cpp
 
 HEADERS += \
     ffmpeg.h \
     mainwindow.h \
     slider.h \
-    title.h
+    title.h \
+    videodata.h
 
 FORMS += \
     mainwindow.ui \
